@@ -96,32 +96,97 @@ def edit_temperature(img, temperature):
 
     R, G, B = cv2.split(img)
     R = np.clip(R + temperature, 0, 255).astype(np.uint8)
-    G = np.clip(G - temperature, 0, 255).astype(np.uint8)
+    G = np.clip(G + temperature, 0, 255).astype(np.uint8)
     B = np.clip(B - temperature, 0, 255).astype(np.uint8)
     return cv2.merge((R, G, B))
 
 
-# 编辑图像
-def edit_img(img, brightness=0, contrast=1, saturation=1, sharpness=0, temperature=0):
-    # 亮度和对比度调整
-    img = edit_bright_contrast(img, brightness, contrast)
-
-    # 饱和度调整
-    img_t = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+# 饱和度
+def Saturation(rgb_img, saturation):
+    img_t = cv2.cvtColor(rgb_img, cv2.COLOR_BGR2HSV)
     h, s, v = cv2.split(img_t)
     s = np.clip(s * saturation, 0, 255).astype(np.uint8)  # 确保数据类型为 uint8
     img_t = cv2.merge((h, s, v))  # 确保合并时数据类型一致
     img = cv2.cvtColor(img_t, cv2.COLOR_HSV2BGR)
+    return img
 
+
+# 锐化
+def laplacian_sharpening(image, sharpness, kernel_size=3, scale=0.03, delta=0):
+    # Convert the image to grayscale
+    image = np.uint8(image)
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Compute the Laplacian of the image
+    laplacian = cv2.Laplacian(gray_image, cv2.CV_64F, ksize=kernel_size, scale=scale, delta=delta)
+
+    # Convert Laplacian image to 8-bit
+    laplacian_8u = cv2.convertScaleAbs(laplacian)
+
+    # Convert the 8-bit Laplacian image to BGR
+    laplacian_8u_bgr = cv2.cvtColor(laplacian_8u, cv2.COLOR_GRAY2BGR)
+
+    # Add the Laplacian image to the original image
+    sharpened_image = cv2.addWeighted(image, 1, laplacian_8u_bgr, sharpness, 0)
+
+    return sharpened_image
+
+
+# 编辑图像
+def edit_img(img, brightness=0.0, contrast=1.0, saturation=1.0, sharpness=0.0, temperature=0.0):
+    # 亮度和对比度调整
+    img = edit_bright_contrast(img, brightness, contrast)
+    # 饱和度调整
+    img = Saturation(img, saturation)
     # 锐度调整
-    if sharpness != 0:
-        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]]).astype(np.int32)
-        sharpened_img = cv2.filter2D(img, -1, kernel)
-        sharpened_img = cv2.addWeighted(img, 1 + sharpness, sharpened_img, -sharpness, 0)
-        img = sharpened_img
-
-
+    img = laplacian_sharpening(img, sharpness)
     # 色温调整
     img = edit_temperature(img, temperature)
 
     return img
+
+
+# 图像滤镜处理
+def filter_process(image, index):
+    # 锐利效果
+    def sharpen(img):
+        kernel = np.array([[-1, -1, -1], [-1, 9.5, -1], [-1, -1, -1]])
+        img_sharpen = cv2.filter2D(img, -1, kernel)
+        return img_sharpen
+
+    # 棕褐色滤镜
+    def sepia(img):
+        # 将图像转换为浮点数，以避免数据丢失
+        img_sepia = np.array(img, dtype=np.float32)
+        # 进行矩阵变换，应用Sepia滤镜
+        sepia_matrix = np.array([[0.272, 0.534, 0.131],
+                                 [0.349, 0.686, 0.168],
+                                 [0.393, 0.769, 0.189]])
+        img_sepia = cv2.transform(img_sepia, sepia_matrix)
+        # 将超出255的值剪裁到255，确保所有值都在0-255之间
+        img_sepia = np.clip(img_sepia, 0, 255)
+        # 将图像转换为uint8类型
+        img_sepia = np.array(img_sepia, dtype=np.uint8)
+        return img_sepia
+
+    # HDR effect
+    def HDR(img):
+        hdr = cv2.detailEnhance(img, sigma_s=12, sigma_r=0.15)
+        return hdr
+
+    # 反转滤镜
+    def invert(img):
+        inv = cv2.bitwise_not(img)
+        return inv
+
+    # 美食滤镜
+    def delicious_food(img):
+        img1 = cv2.convertScaleAbs(img, alpha=1, beta=-10)
+        img2 = Saturation(img1, saturation=1.3)
+        img3 = laplacian_sharpening(img2, sharpness=1.5)
+        return img3
+
+    # 冷艳滤镜
+    def cold_filter(img):
+        pass
+
