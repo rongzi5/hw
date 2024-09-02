@@ -1,23 +1,57 @@
 import cv2
 import numpy as np
 import gradio as gr
+from PIL import Image
 
 from . import function
-from .function import to_stego_image, extract_secret_image, edit_img
+from .function import to_stego_image, extract_secret_image, edit_img, filter_process
 
 
-#动态创建文本框
+# 动态创建文本框
 def dummy_function(input_text):
     # 这个函数返回参数个数（可以是其他实际功能）
     return len(input_text.split())  # 例如，返回输入文本中单词的个数
 
 
-#根据输入的Json文件自动创建多个文本框以供微调
+# 处理图像选择事件的函数
+# 暂时处理
+def handle_image_select(image_index):
+    print(image_index)
+
+
+# 展示滤镜效果狂
+# def filter_effects_display(img):
+#     orig = Image.open('./ui/filter_effects_images/orig.jpg')  # 输出原图
+#     images = [orig]
+#
+#     # # 创建按钮选择滤镜效果
+#     # def create_button():
+#     #     buttons = []
+#     #     for index in range(len(images)):
+#     #         button = gr.Button(value=f"Select Image {index + 1}")
+#     #         buttons.append((button, index))
+#     #     return buttons
+#
+#     with gr.Row():
+#         # 创建滑动框
+#         gallery = gr.Gallery(value=images,  label="Images", height=200, width=600,columns=3)
+#         # buttons = create_button()
+#         # for button, index in buttons:
+#         #     button.click(fn=handle_image_select, inputs=[gr.State(value=index)], outputs=None)
+#         #gallery.select(fn=handle_image_select,inputs )
+
+# 滤镜选择框
+def filter_select(image):
+
+    return radio
+
+
+# 根据输入的Json文件自动创建多个文本框以供微调
 def create_textbox(num_boxes):
     textbox = []
     for i in range(num_boxes):
         with gr.Row() as row:
-            #gr.Markdown(f"<center> 在这里修改第{i + 1}处的坐标:</center>")
+            # gr.Markdown(f"<center> 在这里修改第{i + 1}处的坐标:</center>")
             gr.Textbox(scale=1, label=f"{i + 1}处的坐标")
         textbox.append(row)
     return textbox
@@ -35,14 +69,22 @@ def create_ui():
                         with gr.Tab("调节"):
                             # 设置图像调节参数滑动条
                             with gr.Column():
-                                brightness = gr.Slider(label="亮度", minimum=-50, maximum=50, step=0.01, value=0, interactive=True)
-                                Contrast = gr.Slider(label="对比度", minimum=0.3, maximum=3, step=0.01, value=1, interactive=True)
-                                Saturation = gr.Slider(label="饱和度", minimum=0.25, maximum=4, step=0.01, value=1, interactive=True)
-                                Sharpness = gr.Slider(label="锐度", minimum=0, maximum=10, step=0.01, value=0, interactive=True)
-                                Temperature = gr.Slider(label="色温", minimum=-30, maximum=30, step=0.1, value=0, interactive=True)
+                                brightness = gr.Slider(label="亮度", minimum=-50, maximum=50, step=0.01, value=0,
+                                                       interactive=True)
+                                Contrast = gr.Slider(label="对比度", minimum=0.3, maximum=3, step=0.01, value=1,
+                                                     interactive=True)
+                                Saturation = gr.Slider(label="饱和度", minimum=0.25, maximum=4, step=0.01, value=1,
+                                                       interactive=True)
+                                Sharpness = gr.Slider(label="锐度", minimum=0, maximum=10, step=0.01, value=0,
+                                                      interactive=True)
+                                Temperature = gr.Slider(label="色温", minimum=-30, maximum=30, step=0.1, value=0,
+                                                        interactive=True)
 
                         with gr.Tab("滤镜"):
-                            pass
+                            with gr.Row():
+                                radio = gr.Radio(["原图", "锐利", "流年", "HDR", "反色", "美食", "冷艳"],
+                                                 label="滤镜选择", info="请选择你感兴趣的滤镜")
+
                         with gr.Tab("马赛克"):
                             gr.ImageMask()
 
@@ -61,9 +103,10 @@ def create_ui():
                             inputs=[image, brightness, contrast, saturation, sharpness, temperature],
                             outputs=result,
                         )
-
-                setup_listeners(ori_image, brightness, Contrast, Saturation, Sharpness, Temperature,output_edit_image)
-
+                # 监听参数调整
+                setup_listeners(ori_image, brightness, Contrast, Saturation, Sharpness, Temperature, output_edit_image)
+                # 监听滤镜选择
+                radio.change(fn=filter_process, inputs=[ori_image, radio], outputs=output_edit_image)
         with gr.Tab("美颜"):
             with gr.Row():
                 with gr.Column():

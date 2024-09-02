@@ -90,15 +90,46 @@ def edit_bright_contrast(image, bright, contrast):
 
 # 色温
 def edit_temperature(img, temperature):
-    # 确保图像是uint8类型
-    if img.dtype != np.uint8:
-        img = np.uint8(img)
+    # # 确保图像是uint8类型
+    # if img.dtype != np.uint8:
+    #     img = np.uint8(img)
+    #
+    # R, G, B = cv2.split(img)
+    # R = np.clip(R + temperature, 0, 255).astype(np.uint8)
+    # G = np.clip(G + temperature, 0, 255).astype(np.uint8)
+    # B = np.clip(B - temperature, 0, 255).astype(np.uint8)
+    # return cv2.merge((R, G, B))
+    def create_lut(level):
+        # 创建一个查找表（LUT），范围从0到255
+        lut = np.arange(256, dtype=np.uint8)
+        # 更复杂的颜色映射，这里使用简单的线性映射作为示例
+        # 实际上，可以在这里使用更复杂的非线性映射
+        for i in range(256):
+            if i + level > 255:
+                lut[i] = 255
+            elif i + level < 0:
+                lut[i] = 0
+            else:
+                lut[i] = i + level
+        return lut
 
-    R, G, B = cv2.split(img)
-    R = np.clip(R + temperature, 0, 255).astype(np.uint8)
-    G = np.clip(G + temperature, 0, 255).astype(np.uint8)
-    B = np.clip(B - temperature, 0, 255).astype(np.uint8)
-    return cv2.merge((R, G, B))
+    def apply_lut(image, lut):
+        # 使用OpenCV的LUT函数应用查找表
+        return cv2.LUT(image, lut)
+
+    def color_temperature(input, n):
+        result = input.copy()
+        level = n // 2
+        # 创建查找表并应用它到RGB通道
+        lut_r = create_lut(-level/1.5)
+        lut_g = create_lut(level)
+        lut_b = create_lut(level)
+        result[:, :, 2] = apply_lut(result[:, :, 2], lut_r)  # R通道
+        result[:, :, 1] = apply_lut(result[:, :, 1], lut_g)  # G通道
+        result[:, :, 0] = apply_lut(result[:, :, 0], lut_b)  # B通道
+        return result
+
+    return color_temperature(img, temperature)
 
 
 # 饱和度
@@ -155,19 +186,37 @@ def filter_process(image, index):
         return img_sharpen
 
     # 棕褐色滤镜
-    def sepia(img):
-        # 将图像转换为浮点数，以避免数据丢失
-        img_sepia = np.array(img, dtype=np.float32)
-        # 进行矩阵变换，应用Sepia滤镜
-        sepia_matrix = np.array([[0.272, 0.534, 0.131],
-                                 [0.349, 0.686, 0.168],
-                                 [0.393, 0.769, 0.189]])
-        img_sepia = cv2.transform(img_sepia, sepia_matrix)
-        # 将超出255的值剪裁到255，确保所有值都在0-255之间
-        img_sepia = np.clip(img_sepia, 0, 255)
-        # 将图像转换为uint8类型
-        img_sepia = np.array(img_sepia, dtype=np.uint8)
-        return img_sepia
+    # def sepia(img):
+    #     # 将图像转换为浮点数，以避免数据丢失
+    #     img_sepia = np.array(img, dtype=np.float64)
+    #     # 进行矩阵变换，应用Sepia滤镜
+    #     sepia_matrix = np.array([[0.272, 0.534, 0.131],
+    #                              [0.349, 0.686, 0.168],
+    #                              [0.393, 0.769, 0.189]])
+    #     img_sepia = cv2.transform(img_sepia, sepia_matrix)
+    #     # 将超出255的值剪裁到255，确保所有值都在0-255之间
+    #     img_sepia = np.clip(img_sepia, 0, 255)
+    #     # 将图像转换为uint8类型
+    #     img_sepia = np.array(img_sepia, dtype=np.uint8)
+    #     return img_sepia
+    # 怀旧滤镜
+    def nostalgia_filter(img):
+        # 确保图像是 uint8 类型
+        img = img.astype(np.uint8)
+
+        # 拆分图像的 B, G, R 通道
+        B, G, R = cv2.split(img)
+
+        # 对 B 通道应用开平方乘以参数 12
+        B = np.sqrt(B) * 12
+
+        # 将 B 通道的值限制在 0 到 255 之间
+        B = np.clip(B, 0, 255).astype(np.uint8)
+
+        # 合并 B, G, R 通道
+        dst = cv2.merge((B, G, R))
+
+        return dst
 
     # HDR effect
     def HDR(img):
@@ -188,5 +237,25 @@ def filter_process(image, index):
 
     # 冷艳滤镜
     def cold_filter(img):
-        pass
+        img = edit_temperature(img, -20)
+        abs = cv2.convertScaleAbs(img, alpha=1.1, beta=-10)
+        lap = laplacian_sharpening(abs, sharpness=1.3)
+        shadow = edit_bright_contrast(lap, contrast=1.1, bright=-20)
+        sat = Saturation(shadow, saturation=1.2)
+        return sat
 
+    filter_effect = ["原图", "锐利", "流年", "HDR", "反色", "美食", "冷艳"]
+    if index == filter_effect[0]:
+        return image
+    if index == filter_effect[1]:
+        return sharpen(image)
+    elif index == filter_effect[2]:
+        return nostalgia_filter(image)
+    elif index == filter_effect[3]:
+        return HDR(image)
+    elif index == filter_effect[4]:
+        return invert(image)
+    elif index == filter_effect[5]:
+        return delicious_food(image)
+    elif index == filter_effect[6]:
+        return cold_filter(image)
