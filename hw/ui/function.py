@@ -2,7 +2,7 @@ from PIL import Image
 import cv2
 import numpy as np
 from torchvision import transforms
-from .utils import img_resize
+from .utils import img_resize, get_image_color
 import gradio as gr
 
 
@@ -121,7 +121,7 @@ def edit_temperature(img, temperature):
         result = input.copy()
         level = n // 2
         # 创建查找表并应用它到RGB通道
-        lut_r = create_lut(-level/1.5)
+        lut_r = create_lut(-level / 1.5)
         lut_g = create_lut(level)
         lut_b = create_lut(level)
         result[:, :, 2] = apply_lut(result[:, :, 2], lut_r)  # R通道
@@ -177,6 +177,38 @@ def edit_img(img, brightness=0.0, contrast=1.0, saturation=1.0, sharpness=0.0, t
     return img
 
 
+# 单色滤镜
+def apply_monochrome_filters(image, evt: gr.SelectData):
+    [r, g, b] = get_image_color(image, evt)
+
+    # 转换 RGB 到 HSV
+    rgb_color = np.uint8([[[r, g, b]]])
+    hsv_color = cv2.cvtColor(rgb_color, cv2.COLOR_RGB2HSV)[0][0]  # 转换为 HSV 并取出单个像素的值
+
+    # 设置 HSV 的范围上下限
+    lower_bound = np.array([max(hsv_color[0] - 20, 0), 10, 10])
+    upper_bound = np.array([min(hsv_color[0] + 20, 179), 255, 255])
+
+    # 处理图像， 生成mask
+    hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+    mask = cv2.inRange(hsv, lower_bound, upper_bound)
+    mask_inv = cv2.bitwise_not(mask)
+
+    # 获取原图灰度图像
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+    # 过滤前景
+    res = cv2.bitwise_and(image, image, mask=mask)
+    # 过滤背景
+    background = cv2.bitwise_and(gray, gray, mask=mask_inv)
+    background = cv2.cvtColor(background, cv2.COLOR_GRAY2RGB)
+
+    # 合并前景背景
+    result_img = cv2.add(res, background)
+
+    return result_img
+
+
 # 图像滤镜处理
 def filter_process(image, index):
     # 锐利效果
@@ -185,20 +217,6 @@ def filter_process(image, index):
         img_sharpen = cv2.filter2D(img, -1, kernel)
         return img_sharpen
 
-    # 棕褐色滤镜
-    # def sepia(img):
-    #     # 将图像转换为浮点数，以避免数据丢失
-    #     img_sepia = np.array(img, dtype=np.float64)
-    #     # 进行矩阵变换，应用Sepia滤镜
-    #     sepia_matrix = np.array([[0.272, 0.534, 0.131],
-    #                              [0.349, 0.686, 0.168],
-    #                              [0.393, 0.769, 0.189]])
-    #     img_sepia = cv2.transform(img_sepia, sepia_matrix)
-    #     # 将超出255的值剪裁到255，确保所有值都在0-255之间
-    #     img_sepia = np.clip(img_sepia, 0, 255)
-    #     # 将图像转换为uint8类型
-    #     img_sepia = np.array(img_sepia, dtype=np.uint8)
-    #     return img_sepia
     # 怀旧滤镜
     def nostalgia_filter(img):
         # 确保图像是 uint8 类型
@@ -244,7 +262,7 @@ def filter_process(image, index):
         sat = Saturation(shadow, saturation=1.2)
         return sat
 
-    filter_effect = ["原图", "锐利", "流年", "HDR", "反色", "美食", "冷艳"]
+    filter_effect = ["原图", "锐利", "流年", "HDR", "反色", "美食", "冷艳", "单色"]
     if index == filter_effect[0]:
         return image
     if index == filter_effect[1]:
@@ -259,3 +277,7 @@ def filter_process(image, index):
         return delicious_food(image)
     elif index == filter_effect[6]:
         return cold_filter(image)
+    elif index == filter_effect[7]:
+        pass
+
+

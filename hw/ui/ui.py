@@ -4,7 +4,7 @@ import gradio as gr
 from PIL import Image
 
 from . import function
-from .function import to_stego_image, extract_secret_image, edit_img, filter_process
+from .function import to_stego_image, extract_secret_image, edit_img, filter_process,apply_monochrome_filters
 
 
 # 动态创建文本框
@@ -40,11 +40,6 @@ def handle_image_select(image_index):
 #         #     button.click(fn=handle_image_select, inputs=[gr.State(value=index)], outputs=None)
 #         #gallery.select(fn=handle_image_select,inputs )
 
-# 滤镜选择框
-def filter_select(image):
-
-    return radio
-
 
 # 根据输入的Json文件自动创建多个文本框以供微调
 def create_textbox(num_boxes):
@@ -64,9 +59,14 @@ def create_ui():
             with gr.Row():
                 # 左边列：固定宽度
                 with gr.Column():
-                    ori_image = gr.Image(label="Input Image", tool="color-sketch")
+                    # 原图
+                    ori_image = gr.Image(label="Input Image", tool="color-sketch", visible=True)
+                    # 获取图片颜色
+                    get_color_image = gr.Image(label="Upload an image and click to pick a color", tool="editor", visible=False, interactive=True,scale=1)
+                    # 马赛克
+                    mosaic_image = gr.ImageMask(label="Mosaic", visible=False, interactive=True,scale=1)
                     with gr.Row():
-                        with gr.Tab("调节"):
+                        with gr.Tab("调节") as edit:
                             # 设置图像调节参数滑动条
                             with gr.Column():
                                 brightness = gr.Slider(label="亮度", minimum=-50, maximum=50, step=0.01, value=0,
@@ -82,17 +82,18 @@ def create_ui():
 
                         with gr.Tab("滤镜"):
                             with gr.Row():
-                                radio = gr.Radio(["原图", "锐利", "流年", "HDR", "反色", "美食", "冷艳"],
+                                radio = gr.Radio(["原图", "锐利", "流年", "HDR", "反色", "美食", "冷艳", "单色"],
                                                  label="滤镜选择", info="请选择你感兴趣的滤镜")
+                                # threshold = gr.Slider(minimum=0, maximum=100, step=0.01, value=10, visible=False)
 
-                        with gr.Tab("马赛克"):
-                            gr.ImageMask()
+                        mosaic = gr.Tab("马赛克")
 
                 # 右边列：自适应
                 with gr.Column(scale=1):
                     with gr.Column():
                         output_edit_image = gr.Image(label="Output image", interactive=False)
                         gr.Button(value="Save")
+
 
                 def setup_listeners(image, bri, contrast, saturation, sharpness, temperature, result):
                     # 将所有控件的变化事件绑定到 update_image 函数
@@ -103,10 +104,37 @@ def create_ui():
                             inputs=[image, brightness, contrast, saturation, sharpness, temperature],
                             outputs=result,
                         )
+
+                # 按下编辑按钮，更新交互界面
+                def update_edit():
+                    return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
+
+                # 按下单色按钮，更新交互界面
+                def update_interface(filter_type):
+                    if filter_type == '单色':
+                        return gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)  # 原图框，单色图框，阈值滑动条框
+                    else:
+                        return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
+
+                # 按下马赛克按钮，更新界面
+                def update_mosaic():
+                    return gr.update(visible=False), gr.update(visible=True)
+
                 # 监听参数调整
                 setup_listeners(ori_image, brightness, Contrast, Saturation, Sharpness, Temperature, output_edit_image)
-                # 监听滤镜选择
+
+                # 界面更新
+                edit.select(fn=update_edit,outputs=[ori_image,get_color_image,mosaic_image])
+                radio.change(fn=update_interface, inputs=radio, outputs=[ori_image, get_color_image, mosaic_image])
+                mosaic.select(fn=update_mosaic, outputs=[ori_image, mosaic_image])
+
+                # 应用单色滤镜
+                get_color_image.select(fn=apply_monochrome_filters, inputs=[get_color_image], outputs=output_edit_image)
+                # 应用滤镜
                 radio.change(fn=filter_process, inputs=[ori_image, radio], outputs=output_edit_image)
+
+
+
         with gr.Tab("美颜"):
             with gr.Row():
                 with gr.Column():
@@ -123,7 +151,7 @@ def create_ui():
             with gr.Row():
                 with gr.Column():
                     #
-                    #点击交互式抠图的按钮后，隐藏img_cutout，显示img_cutout_inter，可进行交互抠图。提醒：笔刷颜色需要是黑色/白色
+                    # 点击交互式抠图的按钮后，隐藏img_cutout，显示img_cutout_inter，可进行交互抠图。提醒：笔刷颜色需要是黑色/白色
                     img_cutout_inter = gr.Image(label="Input image", interactive=True, visible=False, tool="editor")
                     img_cutout = gr.Image(label="Output image", interactive=True, visible=True)
                     with gr.Row():
