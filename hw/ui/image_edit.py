@@ -281,3 +281,33 @@ def filter_process(image, index):
         pass
 
 
+def apply_mosaic(img, n):
+    ori_image = np.array(img["image"]).astype(np.uint8)  # 确保图像是 uint8 类型
+    mask = img["mask"]
+    if n != 0:
+        if mask is not None:
+            mask = mask.convert("L")  # 转换为灰度图像
+            mask = np.array(mask).astype(np.uint8)  # 转换为 NumPy 数组并确保类型为 uint8
+
+        # 创建马赛克效果
+        mosaic_image = cv2.resize(ori_image, (ori_image.shape[1] // n, ori_image.shape[0] // n),
+                                  interpolation=cv2.INTER_LINEAR)
+        mosaic_image = cv2.resize(mosaic_image, (ori_image.shape[1], ori_image.shape[0]),
+                                  interpolation=cv2.INTER_NEAREST)
+
+        # 确保马赛克图像是 uint8 类型
+        mosaic_image = mosaic_image.astype(np.uint8)
+
+        # 将马赛克效果应用于遮罩区域
+        mosaic_image = cv2.bitwise_and(mosaic_image, mosaic_image, mask=mask)
+
+        # 处理遮罩的反向区域
+        inv_mask = cv2.bitwise_not(mask)
+        ori_image_bg = cv2.bitwise_and(ori_image, ori_image, mask=inv_mask)
+
+        # 合并马赛克和原图的非遮罩区域
+        result_img = cv2.add(mosaic_image, ori_image_bg)
+
+        return Image.fromarray(result_img)  # 返回 PIL 图像以便显示
+    else:
+        return ori_image

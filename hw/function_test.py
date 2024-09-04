@@ -1,18 +1,48 @@
-#导入所需的库
-import cv2
+#import the libraries
+import cv2 as cv
+import numpy as np
 
-#读取输入图像
-image = cv2.imread('demo.jpg')
+# read the image
+img = cv.imread("red_coat.webp")
+# convert the BGR image to HSV colour space
+hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+# obtain the grayscale image of the original image
+gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
-#定义alpha和beta
-alpha = 3 #对比度控制
-beta  = 0  #亮度控制
+# set the bounds for the red hue
+lower_red = np.array([160, 100, 50])
+upper_red = np.array([180, 255, 255])
 
-#调用convertScaleAbs函数
-adjusted = cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
+#create a mask using the bounds set
+mask = cv.inRange(hsv, lower_red, upper_red)
+#create an inverse of the mask
+mask_inv = cv.bitwise_not(mask)
+#Filter only the red colour from the original image using the mask(foreground)
+res = cv.bitwise_and(img, img, mask=mask)
+#Filter the regions containing colours other than red from the grayscale image(background)
+background = cv.bitwise_and(gray, gray, mask=mask_inv)
+#convert the one channelled grayscale background to a three channelled image
+background = np.stack((background,) * 3, axis=-1)
+#add the foreground and the background
+added_img = cv.add(res, background)
 
-#显示输出图像
-cv2.namedWindow('adjusted',cv2.WINDOW_NORMAL)
-cv2.imshow('adjusted', adjusted)
-cv2.waitKey()
-cv2.destroyAllWindows()
+#create resizable windows for the images
+cv.namedWindow("res", cv.WINDOW_NORMAL)
+cv.namedWindow("hsv", cv.WINDOW_NORMAL)
+cv.namedWindow("mask", cv.WINDOW_NORMAL)
+cv.namedWindow("added", cv.WINDOW_NORMAL)
+cv.namedWindow("back", cv.WINDOW_NORMAL)
+cv.namedWindow("mask_inv", cv.WINDOW_NORMAL)
+cv.namedWindow("gray", cv.WINDOW_NORMAL)
+
+#display the images
+cv.imshow("back", background)
+cv.imshow("mask_inv", mask_inv)
+cv.imshow("added", added_img)
+cv.imshow("mask", mask)
+cv.imshow("gray", gray)
+cv.imshow("hsv", hsv)
+cv.imshow("res", res)
+
+if cv.waitKey(0):
+    cv.destroyAllWindows()

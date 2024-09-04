@@ -46,3 +46,4 @@ def get_image_color(image, evt: gr.SelectData):
     x, y = int(evt.index[0]), int(evt.index[1])
     # print(x, y)
     return get_color(image, x, y)
+

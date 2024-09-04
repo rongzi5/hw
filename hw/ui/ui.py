@@ -3,8 +3,8 @@ import numpy as np
 import gradio as gr
 from PIL import Image
 
-from . import function
-from .function import to_stego_image, extract_secret_image, edit_img, filter_process,apply_monochrome_filters
+from . import image_edit
+from .image_edit import to_stego_image, extract_secret_image, edit_img, filter_process,apply_monochrome_filters, apply_mosaic
 
 
 # 动态创建文本框
@@ -64,7 +64,7 @@ def create_ui():
                     # 获取图片颜色
                     get_color_image = gr.Image(label="Upload an image and click to pick a color", tool="editor", visible=False, interactive=True,scale=1)
                     # 马赛克
-                    mosaic_image = gr.ImageMask(label="Mosaic", visible=False, interactive=True,scale=1)
+                    mosaic_image = gr.ImageMask(label="Mosaic", visible=False, interactive=True,scale=1,type='pil')
                     with gr.Row():
                         with gr.Tab("调节") as edit:
                             # 设置图像调节参数滑动条
@@ -86,7 +86,11 @@ def create_ui():
                                                  label="滤镜选择", info="请选择你感兴趣的滤镜")
                                 # threshold = gr.Slider(minimum=0, maximum=100, step=0.01, value=10, visible=False)
 
-                        mosaic = gr.Tab("马赛克")
+                        with gr.Tab("马赛克") as mosaic:
+                            with gr.Column():
+                                weight = gr.Slider(minimum=0, maximum=30, step=1, value=10)
+                                apply_button = gr.Button(value="应用效果")
+
 
                 # 右边列：自适应
                 with gr.Column(scale=1):
@@ -132,6 +136,8 @@ def create_ui():
                 get_color_image.select(fn=apply_monochrome_filters, inputs=[get_color_image], outputs=output_edit_image)
                 # 应用滤镜
                 radio.change(fn=filter_process, inputs=[ori_image, radio], outputs=output_edit_image)
+
+                apply_button.click(fn=apply_mosaic,inputs=[mosaic_image,weight],outputs=output_edit_image)
 
 
 
