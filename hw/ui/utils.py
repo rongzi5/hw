@@ -47,3 +47,6 @@ def get_image_color(image, evt: gr.SelectData):
     # print(x, y)
     return get_color(image, x, y)
 
+# # 得到交互式抠图的遮罩
+# def get_cutout_mask(image, radio):
+#     mask = image["mask"]
