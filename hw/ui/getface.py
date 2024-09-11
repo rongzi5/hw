@@ -27,7 +27,7 @@ def get_prediction(img, threshold=0.5):
     img = transform(img)
     pred = model([img])
     pred_class = [COCO_INSTANCE_CATEGORY_NAMES[i] for i in list(pred[0]['labels'].numpy())]
-    pred_boxes = [[(i[0], i[1]), (i[2], i[3])] for i in list(pred[0]['boxes'].detach().numpy())]
+    pred_boxes = [[ [i[0], i[1]], [i[2], i[3]] ] for i in list(pred[0]['boxes'].detach().numpy())]  # 元组改为列表
     pred_score = list(pred[0]['scores'].detach().numpy())
     pred_t = [pred_score.index(x) for x in pred_score if x > threshold][-1]
     pred_boxes = pred_boxes[:pred_t+1]
@@ -37,6 +37,7 @@ def get_prediction(img, threshold=0.5):
         if pred_class[i] == 'person':
             tem.append(pred_boxes[i])
     return tem
+
 
 
 

@@ -1,20 +1,24 @@
 import cv2
 import numpy as np
 import gradio as gr
+import math
 from PIL import Image
 
 from .image_edit import to_stego_image, extract_secret_image, edit_img, filter_process, apply_monochrome_filters, \
     apply_mosaic
 from .getface import get_prediction
 from .utils import draw_process
+from .shuiyin import Remove_watermark
 
 from .face_edit import beauty_image_processing
+from .style_transfer import style_transfer
 
 send_image = None
 history_mask = None
 color_mask = None
 
 detect_image = None
+detect_image_ori = None
 detect_label = None
 index = None
 
@@ -249,14 +253,15 @@ def create_ui():
 
                 apply_button.click(fn=apply_mosaic, inputs=[mosaic_image, weight], outputs=output_edit_image)
 
-                def get_rotated_dimensions(width, height, angle):
+                def get_rotated_dimensions(width, height, angle, scale):
                     """根据旋转角度计算图像旋转后的尺寸"""
-                    radians = np.radians(angle)
-                    sin = np.abs(np.sin(radians))
-                    cos = np.abs(np.cos(radians))
-                    new_width = int((height * sin) + (width * cos))
-                    new_height = int((height * cos) + (width * sin))
-                    return new_width, new_height
+                    # radians = math.radians(angle)
+                    # 计算旋转前的对角线长度
+                    diagonal = math.sqrt(width ** 2 + height ** 2)
+                    # 计算旋转后的尺寸（对角线长度乘以缩放因子）
+                    new_width = new_height = diagonal * scale
+                    # 返回计算结果
+                    return int(new_width), int(new_height)
 
                 # 图像旋转叠加
                 # def overlay_images(ori_img, overlay_image, scale, rotating_angle, opacity, evt: gr.SelectData):
@@ -277,7 +282,7 @@ def create_ui():
                     width, height = ori_img.shape[:2]
                     width1, height1 = overlay_image.shape[:2]
                     rotated_matrix = cv2.getRotationMatrix2D((width1 / 2, height1 / 2), rotating_angle, scale)
-                    new_width, new_height = get_rotated_dimensions(width1, height1, rotating_angle)
+                    new_width, new_height = get_rotated_dimensions(width1, height1, rotating_angle, scale)
                     rotated_image = cv2.warpAffine(overlay_image, rotated_matrix, (new_width, new_height))
 
                     # 超出部分计算
@@ -290,7 +295,7 @@ def create_ui():
                     else:
                         fh = y + new_height
 
-                    rotated_image = rotated_image[:fh-y, :fw-x]
+                    rotated_image = rotated_image[:fh - y, :fw - x]
 
                     # 创建结果图像的副本
                     result_image = ori_img.copy()
@@ -302,7 +307,7 @@ def create_ui():
                         alpha_channel = overlay_area[:, :, 3]
                         rgb_channel = overlay_area[:, :, :3]
                     else:
-                        alpha_channel = np.ones((fh-y, fw-x), dtype=np.uint8) * 255
+                        alpha_channel = np.ones((fh - y, fw - x), dtype=np.uint8) * 255
                         rgb_channel = rotated_image[:, :, :3]
 
                     black_mask = np.all(rgb_channel == [0, 0, 0], axis=-1)
@@ -390,7 +395,7 @@ def create_ui():
                             with gr.Row():
                                 interactive_button = gr.Button(value="交互式抠图", visible=True)
                                 auto_cutout = gr.Button(value="自动抠图")
-                                photo_make = gr.Button(value="证件照制作", visible=True)
+                                # photo_make = gr.Button(value="证件照制作", visible=True)
                             exit_button = gr.Button(value="退出交互抠图模式", visible=False)
                         with gr.Column():
                             # 前景: (0, 255, 0)，背景:(255,0,0)，可能前景:(0, 255, 255)，可能背景:(255, 0, 255)
@@ -411,12 +416,12 @@ def create_ui():
                 def update_cutout_interface(img):
                     return img, gr.update(visible=False), gr.update(visible=True), gr.update(visible=True), gr.update(
                         visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(
-                        visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=True)
+                        visible=False), gr.update(visible=True), gr.update(visible=True)
 
                 def recover_cutout_interface():
                     return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), gr.update(
                         visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(
-                        visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
+                        visible=True), gr.update(visible=False), gr.update(visible=False)
 
                 # 前景: (0, 255, 0)，背景:(255,0,0)，可能前景:(0, 255, 255)，可能背景:(255, 0, 255)
                 def get_cutout_color(radio):
@@ -474,11 +479,11 @@ def create_ui():
                                          outputs=[img_cutout_interactive, ori_cutout_img, img_cutout_interactive,
                                                   exit_button, select_mask_mode,
                                                   ensure_button, ensure_mask,
-                                                  auto_cutout, photo_make, cutout_result, clear_mask_but])
+                                                  auto_cutout, cutout_result, clear_mask_but])
                 exit_button.click(fn=recover_cutout_interface,
                                   outputs=[ori_cutout_img, img_cutout_interactive, exit_button, select_mask_mode,
                                            ensure_button, ensure_mask,
-                                           auto_cutout, photo_make, cutout_result, clear_mask_but])
+                                           auto_cutout, cutout_result, clear_mask_but])
                 select_mask_mode.change(fn=update_mask_mode, inputs=[select_mask_mode], outputs=img_cutout_interactive)
 
                 ensure_mask.click(fn=get_mask, inputs=[img_cutout_interactive, select_mask_mode],
@@ -488,7 +493,7 @@ def create_ui():
                 ensure_button.click(fn=get_mask_image, inputs=[img_cutout_interactive],
                                     outputs=[cutout_result])
 
-        with gr.Tab("物品识别"):
+        with gr.Tab("人物识别"):
             with gr.Row():
                 with gr.Column():
                     det_image = gr.Image(label="输入待识别的图片", interactive=True)
@@ -509,11 +514,12 @@ def create_ui():
 
                 with gr.Column(scale=1):
                     global detect_label
-                    detect_result_image = gr.Image(label="识别结果", interactive=True, tool='editor')
-                    detect_label = gr.Textbox(scale=1)
+                    detect_result_image = gr.Image(label="识别结果", interactive=True, tool='editor', scale=3)
+                    detect_label = gr.Textbox()
 
                 def detect_result(image):
-                    global detect_image, detect_label
+                    global detect_image, detect_label, detect_image_ori
+                    detect_image_ori = image
                     detect_label = get_prediction(image)
                     image = draw_process(image, detect_label)
                     detect_image = image
@@ -559,6 +565,15 @@ def create_ui():
                     cropped_image = image[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
                     return cropped_image
 
+                def save_update(x1, y1, x2, y2):
+                    global detect_label, index, detect_image_ori
+                    detect_label[index][0][0] = x1
+                    detect_label[index][0][1] = y1
+                    detect_label[index][1][0] = x2
+                    detect_label[index][1][1] = y2
+                    image = draw_process(detect_image_ori, detect_label)
+                    return image, detect_label
+
                 detect_but.click(fn=detect_result, inputs=[det_image], outputs=[detect_result_image, detect_label])
                 detect_result_image.select(fn=update_sliders, inputs=[det_image],
                                            outputs=[select_rect_img, slider1, slider2, slider3, slider4])
@@ -566,14 +581,22 @@ def create_ui():
                 for slider in sliders:
                     slider.change(fn=update_rector, inputs=[slider1, slider2, slider3, slider4, det_image],
                                   outputs=[select_rect_img])
+                save_but.click(fn=save_update, inputs=[slider1, slider2, slider3, slider4],
+                               outputs=[detect_result_image, detect_label])
 
         with gr.Tab("发现"):
             with gr.Tab("风格迁移"):
                 with gr.Row():
                     with gr.Column():
-                        gr.Image()
+                        ori_image = gr.Image()
+                        choice = ["candy", "composition_vii", "feathers", "la_muse", "mosaic", "starry_night",
+                                  "the_wave", "udnie"]
+                        style_select = gr.Dropdown(choices=choice, label="style")
+
                     with gr.Column(scale=1):
-                        gr.Image()
+                        output_image = gr.Image()
+
+                style_select.change(fn=style_transfer, inputs=[ori_image, style_select], outputs=[output_image])
 
             with gr.Tab("图片隐写还原"):
                 with gr.Row():
@@ -589,16 +612,15 @@ def create_ui():
 
             stego_button.click(fn=to_stego_image, inputs=[carrier_img, secret_img], outputs=process_image)
             extract_button.click(fn=extract_secret_image, inputs=process_image, outputs=[carrier_img, secret_img])
-            with gr.Tab("文字识别"):
-                with gr.Row():
-                    with gr.Column():
-                        gr.Image()
-                    with gr.Column(scale=1):
-                        gr.Textbox()
-            with gr.Tab("自动去水印"):
-                with gr.Row():
-                    with gr.Column():
-                        gr.Image()
-                    with gr.Column(scale=1):
-                        gr.Image()
+
+            with gr.Tab("图像修复"):
+                with gr.Column(scale=3):
+                    input_image = gr.Image(label="Background", source="upload", tool="sketch", type="pil",
+                                           brush_color='#000000',
+                                           mask_opacity=0.5, brush_radius=100, interactive=True, height=512)
+                    sure_but = gr.Button(value="确定")
+                with gr.Column(scale=1):
+                    output_image = gr.Image()
+                sure_but.click(fn=Remove_watermark, inputs=[input_image], outputs=[output_image])
+
     return ui
