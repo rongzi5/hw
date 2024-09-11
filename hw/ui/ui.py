@@ -1,18 +1,26 @@
 import cv2
 import numpy as np
 import gradio as gr
+from Demos.SystemParametersInfo import x
 from PIL import Image
 
-from . import image_edit
 from .image_edit import to_stego_image, extract_secret_image, edit_img, filter_process, apply_monochrome_filters, \
     apply_mosaic
+from .getface import get_prediction
+from .utils import draw_process
 
-# from .cutout_function import get_mask_image
+from .face_edit import beauty_image_processing
 
-# from .globals import history_mask, color_mask
-
+send_image = None
 history_mask = None
 color_mask = None
+
+detect_image = None
+detect_label = None
+index = None
+
+x_pos, y_pos = 0, 0
+
 
 # 交互式抠图实现函数
 def get_mask_image(img):
@@ -27,7 +35,7 @@ def get_mask_image(img):
         'purple': ((255, 0, 255), (255, 0, 255))
     }
 
-    # 存储各个类别遮罩的颜色
+    # 存储各个类别遮罩的颜色，初始化初始遮罩为可能的背景
     grabcut_mask = np.full(color_mask.shape[:2], cv2.GC_PR_BGD, dtype=np.uint8)
 
     # 确保 color_mask 和 ori_img 大小一致
@@ -68,53 +76,60 @@ def get_mask_image(img):
     # cv2.destroyAllWindows()
     return result
 
-# 动态创建文本框
-def dummy_function(input_text):
-    # 这个函数返回参数个数（可以是其他实际功能）
-    return len(input_text.split())  # 例如，返回输入文本中单词的个数
+
+def is_point_in_rectangle(point, rectangle):
+    (x, y) = point
+    # 获取矩形的对角点
+    (x1, y1), (x2, y2) = rectangle
+    # 确定最小和最大坐标
+    x_min, x_max = min(x1, x2), max(x1, x2)
+    y_min, y_max = min(y1, y2), max(y1, y2)
+    # 判断点是否在矩形内
+    return x_min <= x <= x_max and y_min <= y <= y_max
 
 
-# 处理图像选择事件的函数
-# 暂时处理
-def handle_image_select(image_index):
-    print(image_index)
+# 找到鼠标区域所选择的矩形并画出来
+def find_rectangle_for_point(image, evt: gr.SelectData):
+    global detect_image, detect_label, index
+    x, y = int(evt.index[0]), int(evt.index[1])
+    point = (x, y)
+    is_find = 0
+    for i, rectangle in enumerate(detect_label):
+        if is_point_in_rectangle(point, rectangle):
+            is_find = 1
+            index = i
+            break
 
-
-# 展示滤镜效果狂
-# def filter_effects_display(img):
-#     orig = Image.open('./ui/filter_effects_images/orig.jpg')  # 输出原图
-#     images = [orig]
-#
-#     # # 创建按钮选择滤镜效果
-#     # def create_button():
-#     #     buttons = []
-#     #     for index in range(len(images)):
-#     #         button = gr.Button(value=f"Select Image {index + 1}")
-#     #         buttons.append((button, index))
-#     #     return buttons
-#
-#     with gr.Row():
-#         # 创建滑动框
-#         gallery = gr.Gallery(value=images,  label="Images", height=200, width=600,columns=3)
-#         # buttons = create_button()
-#         # for button, index in buttons:
-#         #     button.click(fn=handle_image_select, inputs=[gr.State(value=index)], outputs=None)
-#         #gallery.select(fn=handle_image_select,inputs )
+    if is_find != 0:
+        x1 = int(detect_label[index][0][0])
+        y1 = int(detect_label[index][0][1])
+        x2 = int(detect_label[index][1][0])
+        y2 = int(detect_label[index][1][1])
+        w = x2 - x1
+        h = y2 - y1
+        rectangle_select = cv2.rectangle(image, (x1, y1), (x1 + w, y1 + h), (0, 255, 0), 1)
+        return rectangle_select
 
 
 # 根据输入的Json文件自动创建多个文本框以供微调
-def create_textbox(num_boxes):
-    textbox = []
+def create_textbox_slider(image):
+    global detect_label
+    x = image.shape[1]
+    y = image.shape[0]
+    num_boxes = len(detect_label)
+    textbox_slider = []
     for i in range(num_boxes):
         with gr.Row() as row:
             # gr.Markdown(f"<center> 在这里修改第{i + 1}处的坐标:</center>")
             gr.Textbox(scale=1, label=f"{i + 1}处的坐标")
-        textbox.append(row)
-    return textbox
+            gr.Slider(start=0, stop=x, step=0.01, value=(detect_label[i][1][1] + detect_label[i][2][1]) / 2)
+            gr.Slider(start=0, stop=y, step=0.01, value=(detect_label[i][1][2] + detect_label[i][2][2]) / 2)
+        textbox_slider.append(row)
+    return textbox_slider
 
 
 def create_ui():
-    with gr.Blocks() as ui:
+    with (gr.Blocks() as ui):
         # 图像基础编辑
         with gr.Tab("图像编辑"):
             with gr.Row():
@@ -127,6 +142,10 @@ def create_ui():
                                                visible=False, interactive=True, scale=1)
                     # 马赛克
                     mosaic_image = gr.ImageMask(label="Mosaic", visible=False, interactive=True, scale=1, type='pil')
+
+                    # 图像叠加底图
+                    background_image = gr.Image(tool="editor", visible=False, interactive=True, scale=1)
+
                     with gr.Row():
                         with gr.Tab("调节") as edit:
                             # 设置图像调节参数滑动条
@@ -142,7 +161,7 @@ def create_ui():
                                 Temperature = gr.Slider(label="色温", minimum=-30, maximum=30, step=0.1, value=0,
                                                         interactive=True)
 
-                        with gr.Tab("滤镜"):
+                        with gr.Tab("滤镜") as filters:
                             with gr.Row():
                                 radio = gr.Radio(["原图", "锐利", "流年", "HDR", "反色", "美食", "冷艳", "单色"],
                                                  label="滤镜选择", info="请选择你感兴趣的滤镜")
@@ -152,6 +171,18 @@ def create_ui():
                             with gr.Column():
                                 weight = gr.Slider(minimum=0, maximum=30, step=1, value=10)
                                 apply_button = gr.Button(value="应用效果")
+
+                        with gr.Tab("图像叠加") as overlay_but:
+                            with gr.Column():
+                                overlay = gr.Image(label="Overlay", tool="color-sketch", visible=True)
+                                x_pos1 = gr.Slider(minimum=0, maximum=512, step=1, value=0, interactive=True)
+                                y_pos1 = gr.Slider(minimum=0, maximum=512, step=1, value=0, interactive=True)
+                                scale = gr.Slider(label="缩放倍数", minimum=0.2, maximum=5, value=1)
+                                rotating_angle = gr.Slider(label="旋转角度", minimum=-180, maximum=180, step=0.1,
+                                                           value=0,
+                                                           interactive=True)
+                                opacity = gr.Slider(label="透明度", minimum=0, maximum=255, step=0.1, value=255)
+                                refresh = gr.Button(label="刷新")
 
                 # 右边列：自适应
                 with gr.Column(scale=1):
@@ -170,28 +201,53 @@ def create_ui():
                         )
 
                 # 按下编辑按钮，更新交互界面
-                def update_edit():
-                    return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
+                def update_edit_interface(img):
+                    return img, gr.update(visible=True), gr.update(visible=False), gr.update(
+                        visible=False), gr.update(
+                        visible=False)
 
                 # 按下单色按钮，更新交互界面
-                def update_interface(filter_type):
+                def update_monochrome_interface(filter_type, img):
                     if filter_type == '单色':
-                        return gr.update(visible=False), gr.update(visible=True), gr.update(
+                        return img, gr.update(visible=False), gr.update(visible=True), gr.update(
                             visible=False)  # 原图框，单色图框，阈值滑动条框
                     else:
-                        return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
+                        return img, gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
 
                 # 按下马赛克按钮，更新界面
-                def update_mosaic():
-                    return gr.update(visible=False), gr.update(visible=True)
+
+                """
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~图片传递成功！其他图片传递类似 操作
+                """
+
+                def update_mosaic_interface(img):
+                    return img, gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
+
+                """
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                """
+
+                # 更新界面
+                def update_filters(img):
+                    return img, gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
+
+                def overlay_update(img):
+                    return img, gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
 
                 # 监听参数调整
                 setup_listeners(ori_image, brightness, Contrast, Saturation, Sharpness, Temperature, output_edit_image)
 
                 # 界面更新
-                edit.select(fn=update_edit, outputs=[ori_image, get_color_image, mosaic_image])
-                radio.change(fn=update_interface, inputs=radio, outputs=[ori_image, get_color_image, mosaic_image])
-                mosaic.select(fn=update_mosaic, outputs=[ori_image, mosaic_image])
+                edit.select(fn=update_edit_interface, inputs=[ori_image],
+                            outputs=[ori_image, ori_image, get_color_image, mosaic_image, background_image])
+                radio.change(fn=update_monochrome_interface, inputs=[radio, ori_image],
+                             outputs=[get_color_image, ori_image, get_color_image, mosaic_image])
+                filters.select(fn=update_filters, inputs=[ori_image],
+                               outputs=[ori_image, mosaic_image, background_image])
+                mosaic.select(fn=update_mosaic_interface, inputs=[ori_image],
+                              outputs=[mosaic_image, ori_image, mosaic_image, background_image])
+                overlay_but.select(fn=overlay_update, inputs=[ori_image],
+                                   outputs=[background_image, background_image, ori_image, mosaic_image])
 
                 # 应用单色滤镜
                 get_color_image.select(fn=apply_monochrome_filters, inputs=[get_color_image], outputs=output_edit_image)
@@ -200,16 +256,129 @@ def create_ui():
 
                 apply_button.click(fn=apply_mosaic, inputs=[mosaic_image, weight], outputs=output_edit_image)
 
+                def get_rotated_dimensions(width, height, angle):
+                    """根据旋转角度计算图像旋转后的尺寸"""
+                    radians = np.radians(angle)
+                    sin = np.abs(np.sin(radians))
+                    cos = np.abs(np.cos(radians))
+                    new_width = int((height * sin) + (width * cos))
+                    new_height = int((height * cos) + (width * sin))
+                    return new_width, new_height
+
+                # 图像旋转叠加
+                #def overlay_images(ori_img, overlay_image, scale, rotating_angle, opacity, evt: gr.SelectData):
+                def overlay_images(ori_img, overlay_image, x, y, scale, rotating_angle, opacity):
+                    # global x_pos, y_pos
+                    # x, y = int(evt.index[0]), int(evt.index[1])
+                    #
+                    # if evt.index is not None:  # 添加这个检查
+                    #     x, y = int(evt.index[0]), int(evt.index[1])
+                    #     if x_pos != x or y_pos != y:
+                    #         x_pos = x
+                    #         y_pos = y
+                    # else:
+                    #     # 如果 evt.index 是 None，使用之前的 x_pos 和 y_pos
+                    #     x = x_pos
+                    #     y = y_pos
+
+                    width, height = ori_img.shape[:2]
+                    width1, height1 = overlay_image.shape[:2]
+                    rotated_matrix = cv2.getRotationMatrix2D((width1 / 2, height1 / 2), rotating_angle, scale)
+                    new_width, new_height = get_rotated_dimensions(width1, height1, rotating_angle)
+                    rotated_image = cv2.warpAffine(overlay_image, rotated_matrix, (new_width, new_height))
+
+                    # 超出部分计算
+                    if x + new_width > width:
+                        fw = ori_img.shape[1] - x
+                    else:
+                        fw = x + new_width
+                    if y + new_height > height:
+                        fh = ori_img.shape[0] - y
+                    else:
+                        fh = y + new_height
+
+                    rotated_image = rotated_image[:fh, :fw]
+
+                    # 创建结果图像的副本
+                    result_image = ori_img.copy()
+                    # 确定叠加区域
+                    overlay_area = result_image[y:y + new_height, x:x + new_width]
+
+                    # 分离前景图像的RGB和alpha
+                    if overlay_image.shape[2] == 4:
+                        alpha_channel = overlay_image[:, :, 3]
+                        rgb_channel = overlay_image[:, :, :3]
+                    else:
+                        alpha_channel = np.ones((fh, fw), dtype=np.uint8) * 255
+                        rgb_channel = rotated_image[:, :, :3]
+
+                    black_mask = np.all(rgb_channel == [0, 0, 0], axis=-1)
+                    alpha_channel[black_mask == True] = 0
+                    alpha_channel[~black_mask == True] = 255 - (255 - opacity)
+                    # 创建掩码，使用alpha通道确定透明部分
+                    mask = alpha_channel / 255.0
+
+                    for c in range(0, 3):
+                        overlay_area[:, :, c] = (1.0 - mask) * overlay_area[:, :, c] + mask * rgb_channel[:, :, c]
+
+                    result_image[y:y + fh, x:x + fw] = overlay_area
+                    return result_image
+
+                # background_image.select(fn=overlay_images,
+                #                         inputs=[background_image, overlay, scale, rotating_angle, opacity],
+                #                         outputs=output_edit_image)
+
+                def update_xy_slider(image):
+                    x_length, y_length = image.shape[1], image.shape[0]
+                    return gr.update(maxinum=x_length), gr.update(maxinum=y_length)
+
+                refresh.click(fn=update_xy_slider, inputs=[background_image], outputs=[x_pos1, y_pos1])
+
+                x_pos1.change(fn=overlay_images,
+                              inputs=[background_image, overlay, x_pos1, y_pos1, scale, rotating_angle, opacity],
+                              outputs=output_edit_image)
+                y_pos1.change(fn=overlay_images,
+                              inputs=[background_image, overlay, x_pos1, y_pos1, scale, rotating_angle, opacity],
+                              outputs=output_edit_image)
+                scale.change(fn=overlay_images,
+                             inputs=[background_image, overlay, x_pos1, y_pos1, scale, rotating_angle, opacity],
+                             outputs=output_edit_image)
+                rotating_angle.change(fn=overlay_images,
+                                      inputs=[background_image, overlay, x_pos1, y_pos1, scale, rotating_angle,
+                                              opacity],
+                                      outputs=output_edit_image)
+                opacity.change(fn=overlay_images,
+                               inputs=[background_image, overlay, x_pos1, y_pos1, scale, rotating_angle, opacity],
+                               outputs=output_edit_image)
+
         with gr.Tab("美颜"):
             with gr.Row():
                 with gr.Column():
-                    gr.Image()
+                    face_image = gr.Image()
                     with gr.Tab("参数调节"):
-                        gr.Slider(label="大眼", minimum=0, maximum=100, step=0.1, value=0.1, interactive=True)
-                        gr.Slider(label="瘦脸", minimum=0, maximum=100, step=0.1, value=0.1, interactive=True)
-                        gr.Slider(label="磨皮", minimum=0, maximum=100, step=0.1, value=0.1, interactive=True)
+                        big_eyes = gr.Slider(label="大眼", minimum=0, maximum=50, step=0.1, value=20,
+                                             interactive=True)
+                        whitening = gr.Slider(label="美白", minimum=0, maximum=100, step=0.1, value=30,
+                                              interactive=True)
+                        smooth = gr.Slider(label="磨皮", minimum=0, maximum=1, step=0.01, value=0.3,
+                                           interactive=True)
+                        thin_face = gr.Slider(label="瘦脸", minimum=0.8, maximum=1.2, step=0.01, value=1,
+                                              interactive=True)
+
                 with gr.Column(scale=1):
-                    gr.Image()
+                    beauty_image = gr.Image()
+
+        big_eyes.change(fn=beauty_image_processing, inputs=[face_image, big_eyes, whitening, smooth, thin_face],
+                        outputs=[beauty_image])
+        whitening.change(fn=beauty_image_processing,
+                         inputs=[face_image, big_eyes, whitening, smooth, thin_face],
+                         outputs=[beauty_image])
+        smooth.change(fn=beauty_image_processing,
+                      inputs=[face_image, big_eyes, whitening, smooth, thin_face],
+                      outputs=[beauty_image])
+        thin_face.change(fn=beauty_image_processing,
+                         inputs=[face_image, big_eyes, whitening, smooth, thin_face],
+                         outputs=[beauty_image])
 
         #抠图设置
         with gr.Tab("抠图"):
@@ -219,13 +388,16 @@ def create_ui():
                     # 点击交互式抠图的按钮后，隐藏img_cutout，显示img_cutout_inter，可进行交互抠图。提醒：笔刷颜色需要是黑色/白色
                     ori_cutout_img = gr.Image(label="Output image", interactive=True, visible=True)
                     img_cutout_interactive = gr.Image(label="Background", source="upload", tool="sketch", type="pil",
-                                                      height=512, brush_color='#42b983',
+                                                      brush_color='#42b983',
                                                       mask_opacity=0.5, brush_radius=100, visible=False,
-                                                      interactive=True)
+                                                      interactive=True, scale=1)
 
                     with gr.Row():
                         with gr.Column():
-                            interactive_button = gr.Button(value="交互式抠图", visible=True)
+                            with gr.Row():
+                                interactive_button = gr.Button(value="交互式抠图", visible=True)
+                                auto_cutout = gr.Button(value="自动抠图")
+                                photo_make = gr.Button(value="证件照制作", visible=True)
                             exit_button = gr.Button(value="退出交互抠图模式", visible=False)
                         with gr.Column():
                             # 前景: (0, 255, 0)，背景:(255,0,0)，可能前景:(0, 255, 255)，可能背景:(255, 0, 255)
@@ -234,8 +406,6 @@ def create_ui():
                             with gr.Row():
                                 ensure_mask = gr.Button(value="确定遮罩选择", visible=False, interactive=True)
                                 ensure_button = gr.Button(value="确定", visible=False, interactive=True)
-                        auto_cutout = gr.Button(value="自动抠图")
-                        photo_make = gr.Button(value="证件照制作", visible=True)
 
                 with gr.Column(scale=1):
                     cutout_color = gr.Image(label="Output image", interactive=False)
@@ -244,13 +414,13 @@ def create_ui():
                         clear_mask_but = gr.Button(value="清除遮罩", visible=False, interactive=True)
                         gr.Button(value="Save")
 
-                # 交互式抠图显示框,原抠图显示框 退出按钮,select_mask_mode,ensure_button,ensure_mask,自动抠图，证件照制作, cutout_result,clear_mask_but
-                def update_cutout():
-                    return gr.update(visible=False), gr.update(visible=True), gr.update(visible=True), gr.update(
+                # 图片,交互式抠图显示框,原抠图显示框 退出按钮,select_mask_mode,ensure_button,ensure_mask,自动抠图，证件照制作, cutout_result,clear_mask_but
+                def update_cutout_interface(img):
+                    return img, gr.update(visible=False), gr.update(visible=True), gr.update(visible=True), gr.update(
                         visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(
                         visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=True)
 
-                def recover_cutout():
+                def recover_cutout_interface():
                     return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), gr.update(
                         visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(
                         visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
@@ -307,11 +477,12 @@ def create_ui():
                     color_mask = None
                     return tmp
 
-                interactive_button.click(fn=update_cutout,
-                                         outputs=[ori_cutout_img, img_cutout_interactive, exit_button, select_mask_mode,
+                interactive_button.click(fn=update_cutout_interface, inputs=[ori_cutout_img],
+                                         outputs=[img_cutout_interactive, ori_cutout_img, img_cutout_interactive,
+                                                  exit_button, select_mask_mode,
                                                   ensure_button, ensure_mask,
                                                   auto_cutout, photo_make, cutout_result, clear_mask_but])
-                exit_button.click(fn=recover_cutout,
+                exit_button.click(fn=recover_cutout_interface,
                                   outputs=[ori_cutout_img, img_cutout_interactive, exit_button, select_mask_mode,
                                            ensure_button, ensure_mask,
                                            auto_cutout, photo_make, cutout_result, clear_mask_but])
@@ -327,12 +498,81 @@ def create_ui():
         with gr.Tab("物品识别"):
             with gr.Row():
                 with gr.Column():
-                    gr.Image(label="输入待识别的图片", interactive=True)
+                    det_image = gr.Image(label="输入待识别的图片", interactive=True)
+                    # detect_threshold = gr.Slider(label="检测阈值", minimum=0, maximum=1, value=0.5, step=0.01)
+                    detect_but = gr.Button(value="检测", interactive=True)
+                    with gr.Accordion("坐标微调", open=False) as accordion:
+                        select_rect_img = gr.Image(interactive=False)
+                        slider1 = gr.Slider(label="左上角x值", minimum=0, maximum=512, step=1, value=128,
+                                            interactive=True)
+                        slider2 = gr.Slider(label="左上角y值", minimum=0, maximum=512, step=1, value=128,
+                                            interactive=True)
+                        slider3 = gr.Slider(label="右下角x值", minimum=0, maximum=512, step=1, value=384,
+                                            interactive=True)
+                        slider4 = gr.Slider(label="右下角y值", minimum=0, maximum=512, step=1, value=384,
+                                            interactive=True)
+                        sliders = [slider1, slider2, slider3, slider4]
+                        save_but = gr.Button(value="保存改动")
+
                 with gr.Column(scale=1):
-                    gr.Image(label="识别结果", interactive=False)
-                    with gr.Column():
-                        with gr.Accordion("坐标微调", open=False):
-                            textboxes = create_textbox(3)  # 效果展示
+                    global detect_label
+                    detect_result_image = gr.Image(label="识别结果", interactive=True, tool='editor')
+                    detect_label = gr.Textbox(scale=1)
+
+                def detect_result(image):
+                    global detect_image, detect_label
+                    detect_label = get_prediction(image)
+                    image = draw_process(image, detect_label)
+                    detect_image = image
+                    return image, detect_label
+
+                def update_sliders(image, evt: gr.SelectData):
+                    global detect_label, index
+                    rect_img = find_rectangle_for_point(image, evt)
+
+                    x1 = detect_label[index][0][0]
+                    y1 = detect_label[index][0][1]
+                    x2 = detect_label[index][1][0]
+                    y2 = detect_label[index][1][1]
+
+                    # 确保所有值都是整数
+                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+                    # 扩展像素
+                    width = image.shape[1]
+                    height = image.shape[0]
+                    x1_expanded = max(0, x1 - 30)
+                    y1_expanded = max(0, y1 - 30)
+                    x2_expanded = min(width, x2 + 30)
+                    y2_expanded = min(height, y2 + 30)
+
+                    cropped_image = image[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
+
+                    # 选出矩形的图像， 更新左上角x,y值，右下角x,y值
+                    return cropped_image, gr.Slider.update(minimum=x1 - 30, maximum=x1 + 30,
+                                                           value=x1), gr.Slider.update(minimum=y1 - 30, maximum=y1 + 30,
+                                                                                       value=y1), gr.Slider.update(
+                        minimum=x2 - 30, maximum=x2 + 30, value=x2), gr.Slider.update(minimum=y2 - 30, maximum=y2 + 30,
+                                                                                      value=y2)
+
+                def update_rector(x1, y1, x2, y2, image):
+                    width = image.shape[1]
+                    height = image.shape[0]
+                    x1_expanded = max(0, x1 - 30)
+                    y1_expanded = max(0, y1 - 30)
+                    x2_expanded = min(width, x2 + 30)
+                    y2_expanded = min(height, y2 + 30)
+                    image = cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                    cropped_image = image[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
+                    return cropped_image
+
+                detect_but.click(fn=detect_result, inputs=[det_image], outputs=[detect_result_image, detect_label])
+                detect_result_image.select(fn=update_sliders, inputs=[det_image],
+                                           outputs=[select_rect_img, slider1, slider2, slider3, slider4])
+
+                for slider in sliders:
+                    slider.change(fn=update_rector, inputs=[slider1, slider2, slider3, slider4, det_image],
+                                  outputs=[select_rect_img])
 
         with gr.Tab("发现"):
             with gr.Tab("风格迁移"):

@@ -47,6 +47,21 @@ def get_image_color(image, evt: gr.SelectData):
     # print(x, y)
     return get_color(image, x, y)
 
-# # 得到交互式抠图的遮罩
-# def get_cutout_mask(image, radio):
-#     mask = image["mask"]
+
+# 根据坐标在图像上画出框线
+def draw_rectangle(image, x, y, w, h):
+    image = cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 1)
+    return image
+
+
+def draw_process(image, data):
+    data_length = len(data)
+    for i in range(data_length):
+        x = int(data[i][0][0])
+        y = int(data[i][0][1])
+        x1 = int(data[i][1][0])
+        y1 = int(data[i][1][1])
+        w = x1-x
+        h = y1-y
+        image = draw_rectangle(image, x, y, w, h)
+    return image
