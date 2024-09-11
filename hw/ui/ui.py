@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import gradio as gr
-from Demos.SystemParametersInfo import x
 from PIL import Image
 
 from .image_edit import to_stego_image, extract_secret_image, edit_img, filter_process, apply_monochrome_filters, \
@@ -175,14 +174,16 @@ def create_ui():
                         with gr.Tab("图像叠加") as overlay_but:
                             with gr.Column():
                                 overlay = gr.Image(label="Overlay", tool="color-sketch", visible=True)
-                                x_pos1 = gr.Slider(minimum=0, maximum=512, step=1, value=0, interactive=True)
-                                y_pos1 = gr.Slider(minimum=0, maximum=512, step=1, value=0, interactive=True)
+                                x_pos1 = gr.Slider(label="x坐标", minimum=0, maximum=512, step=1, value=0,
+                                                   interactive=True)
+                                y_pos1 = gr.Slider(label="y坐标", minimum=0, maximum=512, step=1, value=0,
+                                                   interactive=True)
                                 scale = gr.Slider(label="缩放倍数", minimum=0.2, maximum=5, value=1)
                                 rotating_angle = gr.Slider(label="旋转角度", minimum=-180, maximum=180, step=0.1,
                                                            value=0,
                                                            interactive=True)
                                 opacity = gr.Slider(label="透明度", minimum=0, maximum=255, step=0.1, value=255)
-                                refresh = gr.Button(label="刷新")
+                                refresh = gr.Button(value="刷新")
 
                 # 右边列：自适应
                 with gr.Column(scale=1):
@@ -216,16 +217,8 @@ def create_ui():
 
                 # 按下马赛克按钮，更新界面
 
-                """
-                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~图片传递成功！其他图片传递类似 操作
-                """
-
                 def update_mosaic_interface(img):
                     return img, gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
-
-                """
-                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                """
 
                 # 更新界面
                 def update_filters(img):
@@ -266,7 +259,7 @@ def create_ui():
                     return new_width, new_height
 
                 # 图像旋转叠加
-                #def overlay_images(ori_img, overlay_image, scale, rotating_angle, opacity, evt: gr.SelectData):
+                # def overlay_images(ori_img, overlay_image, scale, rotating_angle, opacity, evt: gr.SelectData):
                 def overlay_images(ori_img, overlay_image, x, y, scale, rotating_angle, opacity):
                     # global x_pos, y_pos
                     # x, y = int(evt.index[0]), int(evt.index[1])
@@ -289,27 +282,27 @@ def create_ui():
 
                     # 超出部分计算
                     if x + new_width > width:
-                        fw = ori_img.shape[1] - x
+                        fw = ori_img.shape[1]
                     else:
                         fw = x + new_width
                     if y + new_height > height:
-                        fh = ori_img.shape[0] - y
+                        fh = ori_img.shape[0]
                     else:
                         fh = y + new_height
 
-                    rotated_image = rotated_image[:fh, :fw]
+                    rotated_image = rotated_image[:fh-y, :fw-x]
 
                     # 创建结果图像的副本
                     result_image = ori_img.copy()
                     # 确定叠加区域
-                    overlay_area = result_image[y:y + new_height, x:x + new_width]
+                    overlay_area = result_image[y:fh, x:fw]
 
                     # 分离前景图像的RGB和alpha
                     if overlay_image.shape[2] == 4:
-                        alpha_channel = overlay_image[:, :, 3]
-                        rgb_channel = overlay_image[:, :, :3]
+                        alpha_channel = overlay_area[:, :, 3]
+                        rgb_channel = overlay_area[:, :, :3]
                     else:
-                        alpha_channel = np.ones((fh, fw), dtype=np.uint8) * 255
+                        alpha_channel = np.ones((fh-y, fw-x), dtype=np.uint8) * 255
                         rgb_channel = rotated_image[:, :, :3]
 
                     black_mask = np.all(rgb_channel == [0, 0, 0], axis=-1)
@@ -321,7 +314,7 @@ def create_ui():
                     for c in range(0, 3):
                         overlay_area[:, :, c] = (1.0 - mask) * overlay_area[:, :, c] + mask * rgb_channel[:, :, c]
 
-                    result_image[y:y + fh, x:x + fw] = overlay_area
+                    result_image[y:fh, x:fw, :] = overlay_area
                     return result_image
 
                 # background_image.select(fn=overlay_images,
@@ -330,7 +323,7 @@ def create_ui():
 
                 def update_xy_slider(image):
                     x_length, y_length = image.shape[1], image.shape[0]
-                    return gr.update(maxinum=x_length), gr.update(maxinum=y_length)
+                    return gr.update(maximum=x_length), gr.update(maximum=y_length)
 
                 refresh.click(fn=update_xy_slider, inputs=[background_image], outputs=[x_pos1, y_pos1])
 
