@@ -12,6 +12,7 @@ from .shuiyin import Remove_watermark
 
 from .face_edit import beauty_image_processing
 from .style_transfer import style_transfer
+from .scan_doc import correct_image, manual_dec, four_point_transform
 
 send_image = None
 history_mask = None
@@ -23,6 +24,9 @@ detect_label = None
 index = None
 
 x_pos, y_pos = 0, 0
+
+correct_index = 0
+xy_position_cor = np.zeros((4, 2))
 
 
 # 交互式抠图实现函数
@@ -112,24 +116,6 @@ def find_rectangle_for_point(image, evt: gr.SelectData):
         h = y2 - y1
         rectangle_select = cv2.rectangle(image, (x1, y1), (x1 + w, y1 + h), (0, 255, 0), 1)
         return rectangle_select
-
-
-# 根据输入的Json文件自动创建多个文本框以供微调
-def create_textbox_slider(image):
-    global detect_label
-    x = image.shape[1]
-    y = image.shape[0]
-    num_boxes = len(detect_label)
-    textbox_slider = []
-    for i in range(num_boxes):
-        with gr.Row() as row:
-            # gr.Markdown(f"<center> 在这里修改第{i + 1}处的坐标:</center>")
-            gr.Textbox(scale=1, label=f"{i + 1}处的坐标")
-            gr.Slider(start=0, stop=x, step=0.01, value=(detect_label[i][1][1] + detect_label[i][2][1]) / 2)
-            gr.Slider(start=0, stop=y, step=0.01, value=(detect_label[i][1][2] + detect_label[i][2][2]) / 2)
-        textbox_slider.append(row)
-    return textbox_slider
-
 
 def create_ui():
     with (gr.Blocks() as ui):
@@ -278,7 +264,6 @@ def create_ui():
                     #     # 如果 evt.index 是 None，使用之前的 x_pos 和 y_pos
                     #     x = x_pos
                     #     y = y_pos
-
                     width, height = ori_img.shape[:2]
                     width1, height1 = overlay_image.shape[:2]
                     rotated_matrix = cv2.getRotationMatrix2D((width1 / 2, height1 / 2), rotating_angle, scale)
@@ -394,7 +379,7 @@ def create_ui():
                         with gr.Column():
                             with gr.Row():
                                 interactive_button = gr.Button(value="交互式抠图", visible=True)
-                                auto_cutout = gr.Button(value="自动抠图")
+                                # auto_cutout = gr.Button(value="自动抠图")
                                 # photo_make = gr.Button(value="证件照制作", visible=True)
                             exit_button = gr.Button(value="退出交互抠图模式", visible=False)
                         with gr.Column():
@@ -412,16 +397,14 @@ def create_ui():
                         clear_mask_but = gr.Button(value="清除遮罩", visible=False, interactive=True)
                         gr.Button(value="Save")
 
-                # 图片,交互式抠图显示框,原抠图显示框 退出按钮,select_mask_mode,ensure_button,ensure_mask,自动抠图，证件照制作, cutout_result,clear_mask_but
+                # 图片,交互式抠图显示框,原抠图显示框 退出按钮,select_mask_mode,ensure_button,ensure_mask，证件照制作, cutout_result,clear_mask_but
                 def update_cutout_interface(img):
                     return img, gr.update(visible=False), gr.update(visible=True), gr.update(visible=True), gr.update(
-                        visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(
-                        visible=False), gr.update(visible=True), gr.update(visible=True)
+                        visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
 
                 def recover_cutout_interface():
                     return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), gr.update(
-                        visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(
-                        visible=True), gr.update(visible=False), gr.update(visible=False)
+                        visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
 
                 # 前景: (0, 255, 0)，背景:(255,0,0)，可能前景:(0, 255, 255)，可能背景:(255, 0, 255)
                 def get_cutout_color(radio):
@@ -479,11 +462,11 @@ def create_ui():
                                          outputs=[img_cutout_interactive, ori_cutout_img, img_cutout_interactive,
                                                   exit_button, select_mask_mode,
                                                   ensure_button, ensure_mask,
-                                                  auto_cutout, cutout_result, clear_mask_but])
+                                                  cutout_result, clear_mask_but])
                 exit_button.click(fn=recover_cutout_interface,
                                   outputs=[ori_cutout_img, img_cutout_interactive, exit_button, select_mask_mode,
                                            ensure_button, ensure_mask,
-                                           auto_cutout, cutout_result, clear_mask_but])
+                                           cutout_result, clear_mask_but])
                 select_mask_mode.change(fn=update_mask_mode, inputs=[select_mask_mode], outputs=img_cutout_interactive)
 
                 ensure_mask.click(fn=get_mask, inputs=[img_cutout_interactive, select_mask_mode],
@@ -493,96 +476,43 @@ def create_ui():
                 ensure_button.click(fn=get_mask_image, inputs=[img_cutout_interactive],
                                     outputs=[cutout_result])
 
-        with gr.Tab("人物识别"):
+        with gr.Tab("文档校正"):
             with gr.Row():
                 with gr.Column():
-                    det_image = gr.Image(label="输入待识别的图片", interactive=True)
-                    # detect_threshold = gr.Slider(label="检测阈值", minimum=0, maximum=1, value=0.5, step=0.01)
-                    detect_but = gr.Button(value="检测", interactive=True)
-                    with gr.Accordion("坐标微调", open=False) as accordion:
-                        select_rect_img = gr.Image(interactive=False)
-                        slider1 = gr.Slider(label="左上角x值", minimum=0, maximum=512, step=1, value=128,
-                                            interactive=True)
-                        slider2 = gr.Slider(label="左上角y值", minimum=0, maximum=512, step=1, value=128,
-                                            interactive=True)
-                        slider3 = gr.Slider(label="右下角x值", minimum=0, maximum=512, step=1, value=384,
-                                            interactive=True)
-                        slider4 = gr.Slider(label="右下角y值", minimum=0, maximum=512, step=1, value=384,
-                                            interactive=True)
-                        sliders = [slider1, slider2, slider3, slider4]
-                        save_but = gr.Button(value="保存改动")
+                    input_doc = gr.Image(tool="editor")
+                    with gr.Row():
+                        auto_correct_but = gr.Button(value="自动校正", visible=True)
+                        manual_dec_but = gr.Button(value="手动校正", visible=True)
+                        clear_but = gr.Button(value="清除", visible=False)
+                line_image = gr.Image(interactive=False, visible=False)
+                result_image = gr.Image(interactive=False)
 
-                with gr.Column(scale=1):
-                    global detect_label
-                    detect_result_image = gr.Image(label="识别结果", interactive=True, tool='editor', scale=3)
-                    detect_label = gr.Textbox()
+            def update_line_image():
+                global correct_index, xy_position_cor
+                correct_index = 0
+                xy_position_cor = np.zeros((4, 2))
+                return gr.update(visible=False), gr.update(visible=True), gr.update(visible=True)
 
-                def detect_result(image):
-                    global detect_image, detect_label, detect_image_ori
-                    detect_image_ori = image
-                    detect_label = get_prediction(image)
-                    image = draw_process(image, detect_label)
-                    detect_image = image
-                    return image, detect_label
+            def default():
+                return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
 
-                def update_sliders(image, evt: gr.SelectData):
-                    global detect_label, index
-                    rect_img = find_rectangle_for_point(image, evt)
+            def manual_correct(image, evt: gr.SelectData):
+                global correct_index, xy_position_cor
+                tmp_image = image.copy()
+                x, y = int(evt.index[0]), int(evt.index[1])
+                tmp_image, xy_position_cor, correct_index = manual_dec(tmp_image, correct_index, xy_position_cor, evt)
+                if correct_index == 4:
+                    image1 = four_point_transform(image, xy_position_cor)
+                    correct_index = 0
+                    xy_position_cor = [0, 0]
+                else:
+                    image1 = image
+                return tmp_image, image1
 
-                    x1 = detect_label[index][0][0]
-                    y1 = detect_label[index][0][1]
-                    x2 = detect_label[index][1][0]
-                    y2 = detect_label[index][1][1]
-
-                    # 确保所有值都是整数
-                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-
-                    # 扩展像素
-                    width = image.shape[1]
-                    height = image.shape[0]
-                    x1_expanded = max(0, x1 - 30)
-                    y1_expanded = max(0, y1 - 30)
-                    x2_expanded = min(width, x2 + 30)
-                    y2_expanded = min(height, y2 + 30)
-
-                    cropped_image = image[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
-
-                    # 选出矩形的图像， 更新左上角x,y值，右下角x,y值
-                    return cropped_image, gr.Slider.update(minimum=x1 - 30, maximum=x1 + 30,
-                                                           value=x1), gr.Slider.update(minimum=y1 - 30, maximum=y1 + 30,
-                                                                                       value=y1), gr.Slider.update(
-                        minimum=x2 - 30, maximum=x2 + 30, value=x2), gr.Slider.update(minimum=y2 - 30, maximum=y2 + 30,
-                                                                                      value=y2)
-
-                def update_rector(x1, y1, x2, y2, image):
-                    width = image.shape[1]
-                    height = image.shape[0]
-                    x1_expanded = max(0, x1 - 30)
-                    y1_expanded = max(0, y1 - 30)
-                    x2_expanded = min(width, x2 + 30)
-                    y2_expanded = min(height, y2 + 30)
-                    image = cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 1)
-                    cropped_image = image[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
-                    return cropped_image
-
-                def save_update(x1, y1, x2, y2):
-                    global detect_label, index, detect_image_ori
-                    detect_label[index][0][0] = x1
-                    detect_label[index][0][1] = y1
-                    detect_label[index][1][0] = x2
-                    detect_label[index][1][1] = y2
-                    image = draw_process(detect_image_ori, detect_label)
-                    return image, detect_label
-
-                detect_but.click(fn=detect_result, inputs=[det_image], outputs=[detect_result_image, detect_label])
-                detect_result_image.select(fn=update_sliders, inputs=[det_image],
-                                           outputs=[select_rect_img, slider1, slider2, slider3, slider4])
-
-                for slider in sliders:
-                    slider.change(fn=update_rector, inputs=[slider1, slider2, slider3, slider4, det_image],
-                                  outputs=[select_rect_img])
-                save_but.click(fn=save_update, inputs=[slider1, slider2, slider3, slider4],
-                               outputs=[detect_result_image, detect_label])
+            auto_correct_but.click(fn=correct_image, inputs=[input_doc], outputs=[result_image])
+            manual_dec_but.click(fn=update_line_image, outputs=[auto_correct_but, clear_but, line_image])
+            input_doc.select(fn=manual_correct, inputs=[input_doc], outputs=[line_image, result_image])
+            clear_but.click(fn=default, outputs=[auto_correct_but, clear_but, line_image])
 
         with gr.Tab("发现"):
             with gr.Tab("风格迁移"):
@@ -622,5 +552,98 @@ def create_ui():
                 with gr.Column(scale=1):
                     output_image = gr.Image()
                 sure_but.click(fn=Remove_watermark, inputs=[input_image], outputs=[output_image])
+
+            with gr.Tab("行人识别"):
+                with gr.Row():
+                    with gr.Column():
+                        det_image = gr.Image(label="输入待识别的图片", interactive=True)
+                        # detect_threshold = gr.Slider(label="检测阈值", minimum=0, maximum=1, value=0.5, step=0.01)
+                        detect_but = gr.Button(value="检测", interactive=True)
+                        with gr.Accordion("坐标微调", open=False) as accordion:
+                            select_rect_img = gr.Image(interactive=False)
+                            slider1 = gr.Slider(label="左上角x值", minimum=0, maximum=512, step=1, value=128,
+                                                interactive=True)
+                            slider2 = gr.Slider(label="左上角y值", minimum=0, maximum=512, step=1, value=128,
+                                                interactive=True)
+                            slider3 = gr.Slider(label="右下角x值", minimum=0, maximum=512, step=1, value=384,
+                                                interactive=True)
+                            slider4 = gr.Slider(label="右下角y值", minimum=0, maximum=512, step=1, value=384,
+                                                interactive=True)
+                            sliders = [slider1, slider2, slider3, slider4]
+                            save_but = gr.Button(value="保存改动")
+
+                    with gr.Column(scale=1):
+                        global detect_label
+                        detect_result_image = gr.Image(label="识别结果", interactive=True, tool='editor', scale=3)
+                        detect_label = gr.Textbox()
+
+                    def detect_result(image):
+                        global detect_image, detect_label, detect_image_ori
+                        detect_image_ori = image
+                        detect_label = get_prediction(image)
+                        image = draw_process(image, detect_label)
+                        detect_image = image
+                        return image, detect_label
+
+                    def update_sliders(image, evt: gr.SelectData):
+                        global detect_label, index
+                        rect_img = find_rectangle_for_point(image, evt)
+
+                        x1 = detect_label[index][0][0]
+                        y1 = detect_label[index][0][1]
+                        x2 = detect_label[index][1][0]
+                        y2 = detect_label[index][1][1]
+
+                        # 确保所有值都是整数
+                        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+                        # 扩展像素
+                        width = image.shape[1]
+                        height = image.shape[0]
+                        x1_expanded = max(0, x1 - 30)
+                        y1_expanded = max(0, y1 - 30)
+                        x2_expanded = min(width, x2 + 30)
+                        y2_expanded = min(height, y2 + 30)
+
+                        cropped_image = image[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
+
+                        # 选出矩形的图像， 更新左上角x,y值，右下角x,y值
+                        return cropped_image, gr.Slider.update(minimum=x1 - 30, maximum=x1 + 30,
+                                                               value=x1), gr.Slider.update(minimum=y1 - 30,
+                                                                                           maximum=y1 + 30,
+                                                                                           value=y1), gr.Slider.update(
+                            minimum=x2 - 30, maximum=x2 + 30, value=x2), gr.Slider.update(minimum=y2 - 30,
+                                                                                          maximum=y2 + 30,
+                                                                                          value=y2)
+
+                    def update_rector(x1, y1, x2, y2, image):
+                        width = image.shape[1]
+                        height = image.shape[0]
+                        x1_expanded = max(0, x1 - 30)
+                        y1_expanded = max(0, y1 - 30)
+                        x2_expanded = min(width, x2 + 30)
+                        y2_expanded = min(height, y2 + 30)
+                        image = cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                        cropped_image = image[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
+                        return cropped_image
+
+                    def save_update(x1, y1, x2, y2):
+                        global detect_label, index, detect_image_ori
+                        detect_label[index][0][0] = x1
+                        detect_label[index][0][1] = y1
+                        detect_label[index][1][0] = x2
+                        detect_label[index][1][1] = y2
+                        image = draw_process(detect_image_ori, detect_label)
+                        return image, detect_label
+
+                    detect_but.click(fn=detect_result, inputs=[det_image], outputs=[detect_result_image, detect_label])
+                    detect_result_image.select(fn=update_sliders, inputs=[det_image],
+                                               outputs=[select_rect_img, slider1, slider2, slider3, slider4])
+
+                    for slider in sliders:
+                        slider.change(fn=update_rector, inputs=[slider1, slider2, slider3, slider4, det_image],
+                                      outputs=[select_rect_img])
+                    save_but.click(fn=save_update, inputs=[slider1, slider2, slider3, slider4],
+                                   outputs=[detect_result_image, detect_label])
 
     return ui
