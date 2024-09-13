@@ -264,8 +264,8 @@ def create_ui():
                     #     # 如果 evt.index 是 None，使用之前的 x_pos 和 y_pos
                     #     x = x_pos
                     #     y = y_pos
-                    width, height = ori_img.shape[:2]
-                    width1, height1 = overlay_image.shape[:2]
+                    height, width = ori_img.shape[:2]
+                    height1, width1 = overlay_image.shape[:2]
                     rotated_matrix = cv2.getRotationMatrix2D((width1 / 2, height1 / 2), rotating_angle, scale)
                     new_width, new_height = get_rotated_dimensions(width1, height1, rotating_angle, scale)
                     rotated_image = cv2.warpAffine(overlay_image, rotated_matrix, (new_width, new_height))
@@ -479,13 +479,13 @@ def create_ui():
         with gr.Tab("文档校正"):
             with gr.Row():
                 with gr.Column():
-                    input_doc = gr.Image(tool="editor")
+                    input_doc = gr.Image(tool="editor",height=512)
                     with gr.Row():
                         auto_correct_but = gr.Button(value="自动校正", visible=True)
                         manual_dec_but = gr.Button(value="手动校正", visible=True)
                         clear_but = gr.Button(value="清除", visible=False)
                 line_image = gr.Image(interactive=False, visible=False)
-                result_image = gr.Image(interactive=False)
+            result_image = gr.Image(interactive=False)
 
             def update_line_image():
                 global correct_index, xy_position_cor
